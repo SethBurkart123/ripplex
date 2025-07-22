@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ripplex"
-version = "1.0.0"
+version = "1.0.1"
 description = "A Python framework for parallel execution with automatic dependency resolution and variable capture."
 readme = "README.md"
 license = { file = "LICENSE" }
