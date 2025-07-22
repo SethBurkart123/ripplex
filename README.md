@@ -1,16 +1,5 @@
 # Ripplex
-
-**Turn your sequential Python code into parallel powerhouse with zero refactoring**
-
-Ripplex is a Python framework that makes parallel execution effortless. Write normal code, add a decorator, and watch it run in parallel automatically.
-
-## Why Ripplex?
-
-- **Zero refactoring**: Add `@flow` to existing functions
-- **Smart parallelization**: Automatically detects dependencies 
-- **Variable capture**: Access outer scope variables seamlessly
-- **Visual debugging**: See exactly what's running when
-- **Error resilience**: Multiple strategies for handling failures
+A pythonic parallel computing library that just works
 
 ## Installation
 
@@ -18,240 +7,272 @@ Ripplex is a Python framework that makes parallel execution effortless. Write no
 pip install ripplex
 ```
 
-## Quick Start Guide
+## Two Simple Features
 
-### 1. Start with `@flow` - The Magic Decorator
+### 1. `@flow` - Automatic Parallelization
 
-The `@flow` decorator is Ripplex's crown jewel. It analyzes your code and runs independent operations in parallel:
+Add `@flow` to any function and Ripplex automatically runs independent operations in parallel.
 
 ```python
 from ripplex import flow
-import time
 
-def fetch_user_data(user_id):
-    """Simulate API call"""
-    time.sleep(1)
-    return {"id": user_id, "name": f"User {user_id}"}
-
-def fetch_user_posts(user_id):
-    """Simulate another API call"""  
-    time.sleep(1.5)
-    return [f"Post {i} by user {user_id}" for i in range(3)]
-
-def fetch_user_friends(user_id):
-    """Simulate third API call"""
-    time.sleep(0.8) 
-    return [f"Friend {i}" for i in range(5)]
-
-@flow(debug=True)  # Shows execution timeline
+@flow
 def get_user_profile(user_id):
     # These three calls run in PARALLEL automatically
-    user = fetch_user_data(user_id)
-    posts = fetch_user_posts(user_id) 
-    friends = fetch_user_friends(user_id)
+    user = fetch_user_data(user_id)      # 1.0s
+    posts = fetch_user_posts(user_id)    # 1.5s  
+    friends = fetch_user_friends(user_id) # 0.8s
     
-    # This runs after all three complete
-    profile = {
+    # This waits for all three to finish, then runs
+    return {
         "user": user,
-        "posts": posts, 
-        "friends": friends,
-        "summary": f"{user['name']} has {len(posts)} posts and {len(friends)} friends"
+        "posts": posts,
+        "friends": friends
     }
-    
-    return profile
 
-# Without @flow: ~3.3 seconds (sequential)
-# With @flow: ~1.5 seconds (parallel)
+# Sequential: 3.3 seconds
+# With @flow: 1.5 seconds
 result = get_user_profile(123)
 ```
 
-#### Execution Flow Visualization
+**Zero refactoring required.** Just add the decorator.
 
-```mermaid
-graph TD
-    A[Call get_user_profile] --> B[fetch_user_data]
-    A --> C[fetch_user_posts] 
-    A --> D[fetch_user_friends]
-    B --> E[Create profile object]
-    C --> E
-    D --> E
-    E --> F[Return result]
-    
-    style B fill:#e1f5fe
-    style C fill:#e1f5fe  
-    style D fill:#e1f5fe
-    style E fill:#f3e5f5
-```
+### 2. `@loop` - Parallel Processing
 
-### 2. Parallel Loops with `@loop`
-
-Process collections in parallel with automatic variable capture:
+Process lists in parallel with automatic variable capture.
 
 ```python
 from ripplex import loop
-import requests
 
-# Configuration available to all loop iterations
-API_KEY = "your-secret-key"
+# Variables from outer scope are automatically available
+API_KEY = "secret-key"
 BASE_URL = "https://api.example.com"
-batch_size = 100
 
 user_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-@loop(user_ids, debug=True)  # Shows progress bar
-def fetch_user_details(user_id):
-    # API_KEY, BASE_URL, and batch_size are automatically available!
-    url = f"{BASE_URL}/users/{user_id}?key={API_KEY}&batch={batch_size}"
-    # In real code: response = requests.get(url)
-    return {"id": user_id, "data": f"User data for {user_id}"}
+@loop(user_ids)
+def fetch_user(user_id):
+    # API_KEY and BASE_URL automatically available!
+    url = f"{BASE_URL}/users/{user_id}?key={API_KEY}"
+    return requests.get(url).json()
 
-# Result: [{"id": 1, "data": "..."}, {"id": 2, "data": "..."}, ...]
-print(f"Fetched {len(fetch_user_details)} users")
+# The decorated function becomes a list of results!
+print(f"Fetched {len(fetch_user)} users in parallel")
+print(fetch_user[0])  # First user's data
 ```
 
-### 3. Real-World Data Pipeline Example
+**No setup needed.** Outer variables just work.
 
-Here's how `@flow` and `@loop` work together:
+## Working with @loop Results
+
+The `@loop` decorator returns a special `LoopResult` object that acts like a list but includes extra metadata:
+
+```python
+@loop([1, 2, 0, 4, 0, 6], on_error="collect")
+def divide(n):
+    return 100 / n
+
+# It's a list!
+print(divide)            # [100, 50, None, 25, None, 16.67]
+print(divide[0])         # 100
+print(len(divide))       # 6
+
+# But with extras!
+print(divide.success_count)    # 4 successful
+print(divide.total_count)      # 6 total attempts
+print(divide.all_successful)   # False
+print(divide.errors)           # {2: ZeroDivisionError(...), 4: ZeroDivisionError(...)}
+```
+
+## Error Handling Options
+
+The `@loop` decorator provides three strategies for handling errors:
+
+```python
+data = [1, 2, 0, 4, 0, 6]  # Zeros will cause division errors
+
+# Option 1: "continue" (default) - Skip failures, only return successes
+@loop(data, on_error="continue")
+def divide_continue(n):
+    return 100 / n
+# Returns: [100, 50, 25, 16.67] - failed items removed
+
+# Option 2: "raise" - Stop on first error
+@loop(data, on_error="raise")
+def divide_raise(n):
+    return 100 / n
+# Raises: ZeroDivisionError (and cancels remaining)
+
+# Option 3: "collect" - Keep None for failures, preserve positions
+@loop(data, on_error="collect")
+def divide_collect(n):
+    return 100 / n
+# Returns: [100, 50, None, 25, None, 16.67] - preserves list structure
+```
+
+## More Ways to Parallelize
+
+### Functional API - No Decorators Needed
+
+```python
+from ripplex import pmap, execute, quick_map
+
+# One-liner parallel map
+squared = pmap(lambda x: x**2, range(100))
+
+# Execute with options
+results = execute(process_item, items, workers=8, on_error="collect")
+
+# Super quick for prototyping
+doubled = quick_map(lambda x: x * 2, [1,2,3,4,5])
+```
+
+### Convenience Aliases
+
+```python
+import ripplex as rx
+
+# Use short aliases for less typing
+@rx.f  # Instead of @flow
+def complex_pipeline():
+    data = fetch_data()
+    processed = transform(data)
+    return processed
+
+@rx.l(items)  # Instead of @loop  
+def process(item):
+    return item * 2
+
+# Ultra-short parallel map
+results = rx.p(lambda x: x**2, range(10))
+```
+
+## Complete Example
+
+Here's a real-world data pipeline using both features:
 
 ```python
 from ripplex import flow, loop
-import time
 
-@flow(debug=True)
+@flow  
 def process_sales_data():
-    """Complete sales processing pipeline running in parallel"""
+    # Step 1: Fetch data in parallel
+    sales = fetch_sales_data()        # 2s
+    customers = fetch_customers()     # 1.5s
+    products = fetch_products()       # 1s
     
-    # Step 1: These data fetches run in parallel
-    raw_sales = fetch_sales_data()          # 2 seconds
-    customer_data = fetch_customer_data()   # 1.5 seconds  
-    product_catalog = fetch_product_data()  # 1 second
-    
-    # Step 2: These processing steps also run in parallel
-    # (they all depend on the data above, so wait for it)
-    cleaned_sales = clean_sales_data(raw_sales)
-    enriched_customers = enrich_customer_data(customer_data, product_catalog)
-    
-    # Step 3: Parallel processing of sales records
-    @loop(cleaned_sales, workers=4)
-    def process_sale(sale):
-        # Automatically has access to enriched_customers!
-        customer = enriched_customers.get(sale['customer_id'])
+    # Step 2: Process each sale in parallel  
+    @loop(sales, workers=8)
+    def enrich_sale(sale):
+        # customers and products automatically available!
+        customer = customers[sale['customer_id']]
+        product = products[sale['product_id']]
+        
         return {
             **sale,
             'customer_name': customer['name'],
-            'customer_tier': customer['tier'],
-            'profit_margin': calculate_margin(sale, product_catalog)
+            'product_name': product['name'],
+            'profit': sale['price'] - product['cost']
         }
     
-    # Step 4: Generate reports in parallel
-    daily_report = generate_daily_report(process_sale)
-    customer_insights = analyze_customers(process_sale)
+    # Step 3: Generate reports in parallel
+    summary = generate_summary(enrich_sale)
+    insights = analyze_trends(enrich_sale)
     
-    return {
-        'processed_sales': process_sale,
-        'daily_report': daily_report, 
-        'insights': customer_insights
-    }
+    return {'sales': enrich_sale, 'summary': summary, 'insights': insights}
 
-# Without Ripplex: ~15 seconds sequential
-# With Ripplex: ~6 seconds parallel
+# Sequential: ~15 seconds
+# With Ripplex: ~6 seconds  
 result = process_sales_data()
 ```
 
-## Error Handling Made Easy
+## Debugging
+
+Add `debug=True` to see what's happening:
 
 ```python
-# Handle errors gracefully in parallel loops
-data = [1, 2, 0, 4, 0, 6]  # Some will cause division errors
-
-@loop(data, on_error="collect", debug=True)
-def safe_divide(n):
-    return 100 / n  # Will fail on zeros
-
-print(f"Successful results: {len(safe_divide)}")           # 4
-print(f"Failed operations: {len(safe_divide.errors)}")     # 2  
-print(f"Success rate: {safe_divide.success_count}/{safe_divide.total_count}")  # 4/6
-
-# Access specific errors
-for index, error in safe_divide.errors.items():
-    print(f"Item {index} failed: {error}")
-```
-
-## Complete API Reference
-
-### `@flow(debug=False)`
-
-Analyzes function dependencies and parallelizes independent operations.
-
-```python
-@flow(debug=True)  # Shows execution timeline
+@flow(debug=True)
 def my_function():
-    # Your code here - no changes needed!
+    # Shows execution timeline
+    pass
+
+@loop(items, debug=True) 
+def process_item(item):
+    # Shows progress bar
     pass
 ```
 
-**Parameters:**
-- `debug` (bool): Show visual execution timeline and timing info
+## API Reference
 
-### `@loop(iterable, *, workers=None, debug=False, on_error="continue")`
+### Decorators
 
-Processes items in parallel with automatic variable capture. Items are processed concurrently but the decorator waits for all items to complete before returning results.
+#### `@flow(debug=False)`
+Automatically parallelizes independent operations in a function by analyzing dependencies.
 
-```python
-@loop(items, workers=8, debug=True, on_error="collect")
-def process_item(item):
-    # Process each item
-    return result
-```
+#### `@loop(iterable, workers=None, on_error="continue", debug=False)`
+Processes items in parallel with automatic variable capture.
 
 **Parameters:**
-- `iterable`: Items to process (list, range, etc.)
-- `workers` (int): Number of threads (default: min(len(items), 32))
-- `debug` (bool): Show progress bar with timing
-- `on_error` (str): Error handling strategy:
-  - `"continue"`: Skip failed items, return successful results
+- `iterable`: Items to process (or an integer for `range(n)`)
+- `workers`: Number of threads (default: smart auto-detection)
+- `on_error`: Error handling strategy:
+  - `"continue"`: Skip errors, return only successes
   - `"raise"`: Stop on first error
-  - `"collect"`: Continue processing, include None for failures
+  - `"collect"`: Include `None` for failures, preserve list positions
+- `debug`: Show progress bar and timing
 
-**Returns:** `LoopResult` (enhanced list with error tracking)
+**Returns:** `LoopResult` - an enhanced list with error tracking
 
-**Note:** `@loop` blocks until all items are processed. Results are returned in the same order as the input, regardless of completion order.
+### Functions
 
-### `pmap(function, iterable, **kwargs)`
-
-Functional-style parallel map.
-
+#### `pmap(function, iterable, **kwargs)`
+Functional parallel map for one-liners:
 ```python
-from ripplex import pmap
-
-# Simple parallel mapping
-results = pmap(lambda x: x ** 2, [1, 2, 3, 4])  # [1, 4, 9, 16]
-
-# With error handling
-results = pmap(safe_operation, data, on_error="collect")
+results = pmap(lambda x: x**2, [1,2,3,4])  # [1,4,9,16]
 ```
 
-## Tips
+#### `execute(function, items, **kwargs)`
+Execute a function in parallel without decorators:
+```python
+results = execute(process_item, items, workers=10, on_error="collect")
+```
 
-- **I/O bound tasks**: Use more workers (`workers=20`)
-- **CPU bound tasks**: Use fewer workers (`workers=4`) 
-- **Debugging**: Always start with `debug=True`
-- **Error handling**: Use `on_error="collect"` to continue processing
+#### `quick_map(function, items)`
+Simplest parallel map with defaults:
+```python
+results = quick_map(lambda x: x * 2, items)
+```
 
-## Contributing
+#### `summary(loop_result)`
+Get a human-readable summary of loop execution:
+```python
+from ripplex import summary
 
-We welcome contributions! Here's how to get started:
+@loop(items, on_error="collect")
+def process(item):
+    return risky_operation(item)
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request
+print(summary(process))
+# 📊 Execution Summary:
+#    Total items: 100
+#    Successful: 95
+#    Failed: 5
+#    Success rate: 95.0%
+```
 
-## License
+## Performance Tips
 
-MIT License - see [LICENSE](LICENSE) for details.
+- **I/O heavy**: Use more workers (`workers=20`)
+- **CPU heavy**: Use fewer workers (`workers=4`) 
+- **Start with**: `debug=True` to see what's happening
+- **Error handling**: Use `on_error="collect"` to see which items failed
 
+## Gotchas and Tips
 
----
+1. **@flow analyzes code**: Each parallelizable operation must be an assignment that creates a new variable
+2. **Thread-based**: Best for I/O-bound tasks (API calls, file operations, database queries)
+3. **Auto-captures variables**: Inner functions automatically see outer scope - no need to pass everything
+4. **Smart defaults**: Worker count auto-scales based on workload
+5. **Not for CPU-bound**: Use `multiprocessing` for heavy computation
 
 **Ready to supercharge your Python code?** Start with `@flow` on your existing functions and watch them run in parallel!
