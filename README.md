@@ -259,20 +259,3 @@ print(summary(process))
 #    Failed: 5
 #    Success rate: 95.0%
 ```
-
-## Performance Tips
-
-- **I/O heavy**: Use more workers (`workers=20`)
-- **CPU heavy**: Use fewer workers (`workers=4`) 
-- **Start with**: `debug=True` to see what's happening
-- **Error handling**: Use `on_error="collect"` to see which items failed
-
-## Gotchas and Tips
-
-1. **@flow analyzes code**: Each parallelizable operation must be an assignment that creates a new variable
-2. **Thread-based**: Best for I/O-bound tasks (API calls, file operations, database queries)
-3. **Auto-captures variables**: Inner functions automatically see outer scope - no need to pass everything
-4. **Smart defaults**: Worker count auto-scales based on workload
-5. **Not for CPU-bound**: Use `multiprocessing` for heavy computation
-
-**Ready to supercharge your Python code?** Start with `@flow` on your existing functions and watch them run in parallel!
